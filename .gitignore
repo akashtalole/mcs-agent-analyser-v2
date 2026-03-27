@@ -1,0 +1,48 @@
+assets/external/
+*.db
+.states
+.web
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+wheels/
+.eggs/
+
+# Virtual env
+.venv/
+venv/
+
+# Environment
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.claude/
+.worktrees/
+
+# Bot export data (proprietary)
+botContent*/
+Transcripts/
+
+# Persistent app data
+data/*
+!data/default_rules.yaml
+
+# Local docs / plans (keep screenshots for README)
+docs/*
+!docs/screenshots/
