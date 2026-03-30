@@ -215,6 +215,9 @@ class AgentTurnSummary(BaseModel):
     redirects: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     latency_ms: float = 0.0
+    system_topics_fired: list[str] = Field(default_factory=list)
+    orchestrator_ask: str = ""
+    context_enriched: bool | None = None  # None = no debug data; False = no context used
 
 
 class MultiTurnAgentAnalysis(BaseModel):

@@ -1980,6 +1980,49 @@ def _mcs_multi_turn_turn_card(item: dict) -> rx.Component:
             ),
             rx.box(),
         ),
+        # System topic intrusion warning (GPT-5-Chat issue indicator)
+        rx.cond(
+            item["system_topics_fired"] != "",
+            rx.hstack(
+                rx.icon("triangle-alert", size=12, color="var(--red-11)"),
+                rx.text(
+                    "System topic fired: ",
+                    rx.text.span(item["system_topics_fired"], font_weight="600"),
+                    font_size="12px",
+                    color="var(--red-11)",
+                ),
+                spacing="1",
+                align="center",
+            ),
+            rx.box(),
+        ),
+        # Context drop indicator (orchestrator ignored conversation history)
+        rx.cond(
+            item["context_enriched"] == "False",
+            rx.hstack(
+                rx.icon("alert-circle", size=12, color="var(--amber-11)"),
+                rx.text(
+                    "Context may have dropped — orchestrator re-interpreted as raw query",
+                    font_size="12px",
+                    color="var(--amber-11)",
+                ),
+                spacing="1",
+                align="center",
+            ),
+            rx.box(),
+        ),
+        # Orchestrator ask (when it differs from user message — shows context was used)
+        rx.cond(
+            (item["orchestrator_ask"] != "") & (item["orchestrator_ask"] != item["user_message"]),
+            rx.text(
+                rx.text.span("Interpreted as: ", font_weight="600", color="var(--gray-a9)"),
+                item["orchestrator_ask"],
+                font_size="12px",
+                color="var(--gray-a10)",
+                font_style="italic",
+            ),
+            rx.box(),
+        ),
         spacing="1",
         width="100%",
         padding="10px 14px",
@@ -1989,11 +2032,26 @@ def _mcs_multi_turn_turn_card(item: dict) -> rx.Component:
 
 
 def _mcs_multi_turn_freq_row(item: dict) -> rx.Component:
-    """Render one row in the agent frequency table."""
+    """Render one row in the agent frequency table. Never-invoked agents shown with warning."""
     return _grid_row(
         [
-            rx.text(item["agent"], font_size="13px", color="var(--gray-12)"),
-            rx.text(item["count"], font_size="13px", color="var(--indigo-11)", font_family=_MONO, font_weight="600"),
+            rx.cond(
+                item["never_invoked"] == "true",
+                rx.hstack(
+                    rx.text(item["agent"], font_size="13px", color="var(--red-11)"),
+                    rx.badge("Never invoked", color_scheme="red", variant="soft", size="1"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(item["agent"], font_size="13px", color="var(--gray-12)"),
+            ),
+            rx.text(
+                item["count"],
+                font_size="13px",
+                color=rx.cond(item["never_invoked"] == "true", "var(--red-11)", "var(--indigo-11)"),
+                font_family=_MONO,
+                font_weight="600",
+            ),
         ],
         "1fr 80px",
     )

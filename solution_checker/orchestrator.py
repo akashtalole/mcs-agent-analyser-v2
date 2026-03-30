@@ -1,7 +1,8 @@
-"""ORCH001–ORCH005: Orchestrator-specific health checks."""
+"""ORCH001–ORCH006: Orchestrator-specific health checks."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from ._helpers import (
@@ -207,5 +208,39 @@ def _check_orchestrator(work_dir: Path, schema: str) -> list[dict]:
                     "The orchestrator has a mix of native topics and delegated agent tools.",
                 )
             )
+
+    # ORCH006: GPT-5-Chat orchestrator warning (known multi-turn context limitations)
+    try:
+        from model_registry import resolve_hint  # type: ignore[import]
+        config_path = work_dir / "bots" / schema / "configuration.json"
+        if config_path.exists():
+            with config_path.open(encoding="utf-8") as _f:
+                _config = json.load(_f)
+            model_hint = (
+                _config.get("configuration", {}).get("modelNameHint")
+                or _config.get("modelNameHint")
+                or ""
+            )
+            info = resolve_hint(model_hint)
+            if info and info.key == "gpt5chat" and total_agent > 0:
+                results.append(
+                    _warn(
+                        "ORCH006",
+                        "Orchestrator",
+                        "GPT-5-Chat orchestrator: known multi-turn context limitations",
+                        "GPT-5-Chat uses a different routing mechanism than GPT-4.1. "
+                        "In multi-agent orchestration it has limited conversation history "
+                        "access and may: (1) trigger Conversation Boosting mid-conversation "
+                        "(should never fire under generative orchestration), "
+                        "(2) skip connected agents on turns 2+ when context is not retained, "
+                        "(3) trigger Escalation unexpectedly on straightforward questions. "
+                        "Mitigations: ensure agent descriptions are highly distinct (see ORCH004); "
+                        "keep system instructions under 4,000 chars; use global variables to "
+                        "pass key context explicitly between turns; consider raising a "
+                        "Microsoft support ticket with model-comparison evidence.",
+                    )
+                )
+    except Exception:
+        pass  # Registry unavailable — skip check silently
 
     return results
