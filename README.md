@@ -3,7 +3,7 @@
 ![Repo Views](https://komarev.com/ghpvc/?username=Roelzz&label=Repo%20Views&color=0e75b6&style=flat)
 
 # TLDR
-**Peek under the hood of your Copilot Studio agents.** Upload a bot export, drop a conversation transcript, or connect straight to Dataverse; Instantly see what your agent is actually doing under the hood: how the orchestrator routes decisions, which topics/tools/agents fire and why, where knowledge searches hit or miss, how long each step takes, and what falls through the cracks. Architecture reports, best-practice rules, trigger overlap detection, execution timelines, credit estimates.
+**Peek under the hood of your Copilot Studio agents.** Upload a bot export, drop a conversation transcript, or connect straight to Dataverse; instantly see what your agent is actually doing under the hood: how the orchestrator routes decisions, which topics/tools/agents fire and why, where knowledge searches hit or miss, how long each step takes, and what falls through the cracks. Architecture reports, best-practice rules, trigger overlap detection, execution timelines, credit estimates, multi-turn agent routing analysis, and GPT-5-Chat issue detection.
 
 Everything you need to build with confidence and debug without guessing. If you're serious about Copilot Studio development, this belongs in your toolkit.
 
@@ -16,6 +16,7 @@ Everything you need to build with confidence and debug without guessing. If you'
 - **Batch conversation analytics** — aggregate transcripts to surface success rates, topic usage, error patterns, and credit estimates
 - **Bot comparison** — diff two bot exports side by side to see what changed in components, instructions, settings, and connections
 - **Catch issues with AI-powered lint** — instruction audit checks guardrails, topic structure, and component health
+- **Multi-agent diagnostics** — per-turn routing cards flag system topic intrusions (Conversation Boosting, Escalation firing mid-conversation), context drops, and never-invoked connected agents — directly surfaces known GPT-5-Chat orchestrator instabilities
 - **Your data stays yours** — runs locally or self-hosted in your own tenant. No data is sent externally (except to OpenAI/Anthropic if you opt into the Lint feature)
 - **Works with exports and live Dataverse** — upload a `.zip` export, or connect directly to your environment and auto-analyse on login
 
@@ -26,6 +27,8 @@ Everything you need to build with confidence and debug without guessing. If you'
 | **Upload bot export** | Drop a `.zip`, or `botContent.yml` + `dialog.json` — get a full architecture report with quick wins |
 | **Connect to Dataverse** | Device-code auth to your environment, auto-analyses your bot the moment you connect |
 | **Routing analysis** | Orchestrator decision timeline with routing scores, topic lifecycles with redirect tracking, trigger phrase similarity, plan evolution with per-step confidence |
+| **Multi-turn agent analysis** | Per-turn routing cards: agents invoked per turn, outcome (success / failed / redirected), system topic intrusion warnings (Conversation Boosting, Escalation), context-drop detection, session variable retention across turns, agent frequency, never-invoked agent flagging |
+| **GPT-5-Chat diagnostics** | Automatically detects known GPT-5-Chat orchestrator instabilities in multi-agent setups: system topic intrusions, context drops, skipped connected agents; ORCH006 proactive warning in Solution Checker |
 | **Conversation transcripts** | Upload or fetch transcripts from Dataverse — sequence diagrams, Gantt charts, event logs |
 | **Single conversation lookup** | Fetch and analyse a specific conversation by ID directly from Dataverse |
 | **Batch analytics** | Aggregate multiple transcripts — success/failure/escalation rates, topic usage, error patterns, credit estimates |
@@ -218,6 +221,7 @@ CUSTOM_RULES_FILE=data/default_rules.yaml
 - Execution phases with duration and status
 - Mermaid sequence diagram of the conversation flow
 - Mermaid Gantt chart of execution timing
+- Multi-turn agent analysis: per-turn agents invoked, system topics fired (Conversation Boosting, Escalation), context enrichment flag (whether orchestrator used conversation history or echoed the raw query), session variable retention, agent invocation frequency, and never-invoked connected agent detection
 
 **From Dataverse (live connection):**
 - Bot config and all components fetched via Web API
@@ -257,6 +261,7 @@ Each generated report contains:
 12. **Credit Estimate** — MCS message credit estimation based on bot features
 13. **Conversation Trace** — sequence diagram, Gantt chart, phase breakdown, event log, errors
 14. **Routing Analysis** — orchestrator decision timeline with routing scores, topic lifecycles (including redirects to Fallback/GenAI topics), plan evolution with per-step confidence, trigger phrase similarity analysis, condition evaluations
+15. **Multi-Turn Agent Analysis** — per-turn routing cards (agents invoked, outcome, latency), system topic intrusion warnings (Conversation Boosting / Escalation mid-conversation), context-drop detection, orchestrator interpretation vs raw user query, session variable retention table, agent frequency sorted by invocation count, never-invoked agent flagging
 
 Transcript reports contain:
 
@@ -278,6 +283,51 @@ Aggregate multiple conversation transcripts to get a bird's-eye view of bot perf
 1. Connect to Dataverse and fetch transcripts
 2. Select the transcripts you want to analyse
 3. Click **Run Batch Analysis** — results render on the `/batch` page
+
+## Multi-Turn Conversation Analysis
+
+When a conversation transcript is uploaded for an orchestrator bot, the **Routing tab** shows a **Multi-Turn Agent Analysis** section that tracks agent routing across every turn of the conversation.
+
+**What it shows:**
+
+| Element | Description |
+| --- | --- |
+| **KPI strip** | Total turns, agents used, agent switches, turns with variables set, context drops, system topic intrusions |
+| **Per-turn cards** | Turn number, user message, agents invoked, outcome badge (success / failed / redirected), latency, redirects, errors, variables set count |
+| **System topic intrusion** | Red warning when Conversation Boosting, Escalation, or Fallback fires on a turn — these should never fire in generative orchestration |
+| **Context-drop warning** | Amber warning when the orchestrator's re-interpretation of the query is identical to the raw user message, indicating conversation history was not used |
+| **Interpreted as** | Shows the orchestrator's reformulated ask when it differs from the user's literal message |
+| **Agent frequency table** | Lists every agent invoked across all turns sorted by count; configured agents that were never called appear in red with a "Never invoked" badge |
+| **Variable retention table** | Session variables set during the conversation with scope, turn set, and initial value |
+
+**How to use:**
+1. Export a conversation transcript from **Copilot Studio Admin Center → Conversations → Export**
+2. Upload it alongside your bot ZIP in Agent Analyser
+3. Navigate to **Analysis → Routing tab** and scroll to **Multi-Turn Agent Analysis**
+
+## GPT-5-Chat Multi-Agent Diagnostics
+
+GPT-5-Chat uses a different routing mechanism than GPT-4.1 and has documented limitations in multi-agent orchestration: limited conversation history access causes it to misroute on turns 2+ in ways that GPT-4.1 handles correctly.
+
+**Known symptoms this tool detects:**
+
+| Indicator | What it means | Where it appears |
+| --- | --- | --- |
+| 🔴 **System topic fired: Conversation Boosting** | Orchestrator failed to match intent — should never fire in generative orchestration | Per-turn card in Multi-Turn Analysis |
+| 🔴 **System topic fired: Escalate** | Unexpected escalation on a turn that should have been handled | Per-turn card in Multi-Turn Analysis |
+| 🟡 **Context may have dropped** | `orchestrator_ask` matches raw user message — orchestrator ignored conversation history | Per-turn card in Multi-Turn Analysis |
+| 🔴 **Never invoked** (agent frequency table) | A configured connected agent was never called across the entire conversation | Agent frequency table |
+| 🟡 **ORCH006** (Solution Checker) | GPT-5-Chat detected as orchestrator model on a multi-agent bot | Solution Checker → ORCH tab |
+
+**ORCH006 mitigations (shown in the warning):**
+- Ensure connected agent descriptions are highly distinct (see also ORCH004)
+- Keep system instructions under 4,000 characters
+- Use global variables to pass key context explicitly between turns (`ContinueResponse = False` pattern)
+- Consider raising a Microsoft support ticket with model-comparison evidence (GPT-4.1 vs GPT-5-Chat)
+
+**How to use:**
+1. Upload your bot ZIP — Solution Checker auto-runs; look for ORCH006 under the ORCH category
+2. Upload a failing multi-turn transcript — Routing tab → Multi-Turn Agent Analysis → look for red/amber badges on turn 2+
 
 ## Bot Comparison
 
@@ -311,7 +361,13 @@ Built-in check categories:
 - **TOP** — topic structure and trigger checks
 - **KNO** — knowledge source checks
 - **SEC** — security configuration checks
-- **ORCH** — orchestrator bot checks
+- **ORCH** — orchestrator bot checks (ORCH001–ORCH006):
+  - ORCH001: Agent tools have connection references
+  - ORCH002: Fallback handler (OnUnknownIntent) exists
+  - ORCH003: No single agent dominates >70% of routed topics
+  - ORCH004: Agent descriptions are distinct (clear routing)
+  - ORCH005: Agent-to-topic ratio (detect mostly-router bots)
+  - ORCH006: GPT-5-Chat on orchestrator with connected agents — warns about known multi-turn context limitations and recommends mitigations
 
 Custom rules (from your YAML file) also run during solution checks alongside these built-in categories.
 
@@ -403,7 +459,8 @@ uv run reflex run          # dev server — frontend :3000, backend :8000
 
 ```
 main.py                  CLI entry point (Typer)
-models.py                Pydantic models (BotProfile, ConversationTimeline, GptInfo, TopicConnection)
+models.py                Pydantic models (BotProfile, ConversationTimeline, AgentTurnSummary,
+                           MultiTurnAgentAnalysis, GptInfo, TopicConnection)
 parser.py                YAML + JSON parsing, GPT extraction, topic connection extraction
 timeline.py              Dialog activity → timeline event conversion
 transcript.py            Transcript JSON parsing and normalization
@@ -424,7 +481,8 @@ renderer/                Markdown + Mermaid rendering
   knowledge.py           Knowledge source rendering
   profile.py             Bot profile rendering
   report.py              Main report assembly
-  sections.py            Routing tab builders (lifecycles, decision timeline, trigger analysis, plan evolution, routing scores)
+  sections.py            Routing tab builders (lifecycles, decision timeline, trigger analysis,
+                           plan evolution, routing scores, multi-turn agent analysis)
   timeline_render.py     Timeline / conversation trace rendering
 
 solution_checker/        Solution health checker
@@ -434,7 +492,7 @@ solution_checker/        Solution health checker
   topics.py              Topic structure checks (TOP)
   knowledge.py           Knowledge source checks (KNO)
   security.py            Security configuration checks (SEC)
-  orchestrator.py        Orchestrator bot checks (ORCH)
+  orchestrator.py        Orchestrator bot checks (ORCH001–ORCH006, incl. GPT-5-Chat warning)
   solution_xml.py        Solution XML parsing checks (SOL)
 
 web/
@@ -452,7 +510,8 @@ web/
     _report.py           Report generation state
     _rules.py            Custom rules state
     _solution.py         Solution tools state
-    _dynamic.py          Dynamic analysis state (routing, conversation, profile tabs)
+    _dynamic.py          Dynamic analysis state (routing, conversation, profile tabs,
+                           multi-turn agent analysis)
     _upload.py           File upload state
 
   components/            UI components
@@ -463,7 +522,8 @@ web/
     report.py            Report viewer
     rules.py             Rules editor
     solution_tools.py    Solution tools form
-    dynamic_analysis.py  Dynamic analysis panels (routing, conversation, profile)
+    dynamic_analysis.py  Dynamic analysis panels (routing, conversation, profile,
+                           multi-turn agent analysis, GPT-5-Chat diagnostics)
     upload.py            Upload form
 
 data/
