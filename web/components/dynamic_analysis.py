@@ -1877,6 +1877,202 @@ def _mcs_plan_evolution_card(item: dict) -> rx.Component:
     )
 
 
+# ---------------------------------------------------------------------------
+# Multi-turn agent analysis renderers
+# ---------------------------------------------------------------------------
+
+
+def _mcs_multi_turn_kpi_chip(item: dict) -> rx.Component:
+    """Render one KPI box for the multi-turn KPI strip."""
+    return rx.box(
+        rx.vstack(
+            rx.heading(item["value"], size="5", color="var(--indigo-11)", font_weight="700"),
+            rx.text(item["label"], font_size="11px", color="var(--gray-a9)", font_weight="600", text_align="center"),
+            spacing="1",
+            align="center",
+        ),
+        background="var(--indigo-a2)",
+        border=f"1px solid var(--indigo-a4)",
+        border_radius="12px",
+        padding="12px 20px",
+        min_width="110px",
+        text_align="center",
+    )
+
+
+def _mcs_multi_turn_turn_card(item: dict) -> rx.Component:
+    """Render one per-turn routing card from mcs_multi_turn_turns."""
+    outcome_color = rx.match(
+        item["outcome"],
+        ("success", "green"),
+        ("failed", "red"),
+        ("redirected", "amber"),
+        "gray",
+    )
+    return rx.vstack(
+        rx.hstack(
+            rx.badge(
+                rx.text.span("#", font_weight="400"),
+                rx.text.span(item["turn_number"], font_weight="700"),
+                color_scheme="indigo",
+                variant="soft",
+                size="2",
+            ),
+            rx.cond(
+                item["agents_invoked"] != "—",
+                rx.text(item["agents_invoked"], font_size="13px", color="var(--gray-12)", font_weight="500"),
+                rx.text("(no agents invoked)", font_size="13px", color="var(--gray-a8)", font_style="italic"),
+            ),
+            rx.spacer(),
+            rx.badge(item["outcome"], color_scheme=outcome_color, variant="soft", size="1"),
+            rx.cond(
+                item["latency_ms"] != "",
+                rx.text(item["latency_ms"], "ms", font_size="11px", color="var(--gray-a8)", font_family=_MONO),
+                rx.box(),
+            ),
+            width="100%",
+            align="center",
+            spacing="2",
+            wrap="wrap",
+        ),
+        rx.cond(
+            item["user_message"] != "",
+            rx.text(item["user_message"], font_size="12px", color="var(--gray-a10)", font_style="italic"),
+            rx.box(),
+        ),
+        rx.cond(
+            item["agent_types"] != "—",
+            rx.text(
+                rx.text.span("Types: ", font_weight="600", color="var(--gray-a9)"),
+                item["agent_types"],
+                font_size="12px",
+                color="var(--gray-a10)",
+            ),
+            rx.box(),
+        ),
+        rx.cond(
+            item["redirects"] != "—",
+            rx.text(
+                rx.text.span("Redirects: ", font_weight="600", color="var(--amber-11)"),
+                item["redirects"],
+                font_size="12px",
+                color="var(--gray-a10)",
+            ),
+            rx.box(),
+        ),
+        rx.cond(
+            item["errors"] != "",
+            rx.text(
+                rx.text.span("Error: ", font_weight="600"),
+                item["errors"],
+                font_size="12px",
+                color="var(--red-11)",
+            ),
+            rx.box(),
+        ),
+        rx.cond(
+            item["variables_set"] != "0",
+            rx.text(
+                item["variables_set"],
+                " variable(s) set this turn",
+                font_size="12px",
+                color="var(--teal-11)",
+            ),
+            rx.box(),
+        ),
+        spacing="1",
+        width="100%",
+        padding="10px 14px",
+        border_bottom=f"1px solid {SURFACE_BORDER}",
+        align="start",
+    )
+
+
+def _mcs_multi_turn_freq_row(item: dict) -> rx.Component:
+    """Render one row in the agent frequency table."""
+    return _grid_row(
+        [
+            rx.text(item["agent"], font_size="13px", color="var(--gray-12)"),
+            rx.text(item["count"], font_size="13px", color="var(--indigo-11)", font_family=_MONO, font_weight="600"),
+        ],
+        "1fr 80px",
+    )
+
+
+def _mcs_multi_turn_var_row(item: dict) -> rx.Component:
+    """Render one row in the variable retention table."""
+    return _grid_row(
+        [
+            rx.text(item["name"], font_size="12px", color="var(--gray-12)", font_family=_MONO),
+            rx.badge(item["scope"], color_scheme="teal", variant="soft", size="1"),
+            rx.text("Turn " + item["set_in_turn"], font_size="12px", color="var(--gray-a9)"),
+            rx.text(item["value"], font_size="12px", color="var(--gray-a10)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
+        ],
+        "1fr 80px 70px 1fr",
+    )
+
+
+def _mcs_multi_turn_section() -> rx.Component:
+    """Composite card for the multi-turn agent analysis section."""
+    return card(
+        rx.hstack(
+            rx.icon("layers", size=16, color="var(--indigo-9)"),
+            section_heading("Multi-Turn Agent Analysis"),
+            spacing="2",
+            align="center",
+        ),
+        rx.text(
+            "How agents were routed, variables retained, and context carried across all conversation turns.",
+            font_size="12px",
+            color="var(--gray-a9)",
+            padding_bottom="8px",
+        ),
+        # KPI strip
+        rx.hstack(
+            rx.foreach(State.mcs_multi_turn_kpis, _mcs_multi_turn_kpi_chip),
+            spacing="3",
+            wrap="wrap",
+            padding_bottom="4px",
+        ),
+        # Per-turn cards
+        sub_heading("Turn-by-Turn Routing"),
+        rx.box(
+            rx.foreach(State.mcs_multi_turn_turns, _mcs_multi_turn_turn_card),
+            width="100%",
+            border=f"1px solid {SURFACE_BORDER}",
+            border_radius="8px",
+            background="var(--gray-a2)",
+            overflow="hidden",
+        ),
+        # Agent frequency table
+        sub_heading("Agent Frequency"),
+        _data_table(
+            ["Agent", "Invocations"],
+            "1fr 80px",
+            State.mcs_multi_turn_agent_freq,
+            _mcs_multi_turn_freq_row,
+        ),
+        # Variable retention (conditional)
+        rx.cond(
+            State.mcs_multi_turn_var_retention.length() > 0,  # type: ignore[union-attr]
+            rx.vstack(
+                sub_heading("Session Variable Retention"),
+                _data_table(
+                    ["Variable", "Scope", "Set In", "Value"],
+                    "1fr 80px 70px 1fr",
+                    State.mcs_multi_turn_var_retention,
+                    _mcs_multi_turn_var_row,
+                ),
+                spacing="2",
+                width="100%",
+                align="start",
+            ),
+        ),
+        spacing="3",
+        width="100%",
+    )
+
+
 def _mcs_routing_panel() -> rx.Component:
     return rx.vstack(
         # Section 1: Orchestrator Decision Timeline
@@ -1983,6 +2179,11 @@ def _mcs_routing_panel() -> rx.Component:
                 ),
                 width="100%",
             ),
+        ),
+        # Section 5: Multi-Turn Agent Analysis
+        rx.cond(
+            State.has_mcs_multi_turn_analysis,
+            _mcs_multi_turn_section(),
         ),
         spacing="4",
         width="100%",
