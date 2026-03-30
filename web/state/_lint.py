@@ -39,9 +39,17 @@ class LintMixin(rx.State, mixin=True):
     async def run_lint(self):
         openai_key = os.getenv("OPENAI_API_KEY", "")
         anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+        azure_key = os.getenv("AZURE_OPENAI_API_KEY", "")
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+        azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+        azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "")
 
-        if not openai_key and not anthropic_key:
-            self.lint_error = "No API key configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env."
+        use_azure = bool(azure_key and azure_endpoint)
+        if not openai_key and not anthropic_key and not use_azure:
+            self.lint_error = (
+                "No API key configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, "
+                "or AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT in .env."
+            )
             return
 
         if not self.bot_profile_json:
@@ -59,6 +67,10 @@ class LintMixin(rx.State, mixin=True):
                 profile,
                 openai_api_key=openai_key,
                 anthropic_api_key=anthropic_key,
+                azure_openai_api_key=azure_key,
+                azure_openai_endpoint=azure_endpoint,
+                azure_openai_api_version=azure_api_version,
+                azure_openai_deployment=azure_deployment,
             )
             self.lint_report_markdown = report
             logger.info(f"Lint complete using {model_used}")

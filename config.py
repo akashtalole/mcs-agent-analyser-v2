@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
 
+    # Azure OpenAI (alternative to OPENAI_API_KEY)
+    azure_openai_api_key: str = ""
+    azure_openai_endpoint: str = ""
+    azure_openai_api_version: str = "2024-12-01-preview"
+    azure_openai_deployment: str = ""
+
     # Feature flags
     mcs_enable_model_comparison: bool = False
 

@@ -2,7 +2,7 @@ import json
 
 from anthropic import AsyncAnthropic
 from loguru import logger
-from openai import AsyncOpenAI
+from openai import AsyncAzureOpenAI, AsyncOpenAI
 
 from models import BotProfile
 from model_registry import resolve_hint
@@ -130,6 +130,30 @@ async def _lint_openai(api_key: str, model_id: str, user_content: str) -> str:
     return response.choices[0].message.content or ""
 
 
+async def _lint_azure_openai(
+    api_key: str,
+    endpoint: str,
+    api_version: str,
+    deployment: str,
+    user_content: str,
+) -> str:
+    """Run lint via Azure OpenAI API."""
+    client = AsyncAzureOpenAI(
+        api_key=api_key,
+        azure_endpoint=endpoint,
+        api_version=api_version,
+    )
+    response = await client.chat.completions.create(
+        model=deployment,
+        temperature=0.3,
+        messages=[
+            {"role": "system", "content": LINT_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+    )
+    return response.choices[0].message.content or ""
+
+
 async def _lint_anthropic(api_key: str, model_id: str, user_content: str) -> str:
     """Run lint via Anthropic API."""
     client = AsyncAnthropic(api_key=api_key)
@@ -149,6 +173,10 @@ async def run_lint(
     profile: BotProfile,
     openai_api_key: str = "",
     anthropic_api_key: str = "",
+    azure_openai_api_key: str = "",
+    azure_openai_endpoint: str = "",
+    azure_openai_api_version: str = "2024-12-01-preview",
+    azure_openai_deployment: str = "",
 ) -> tuple[str, str]:
     """Run the instruction lint against the resolved provider's API.
 
@@ -160,15 +188,34 @@ async def run_lint(
     payload = build_component_payload(profile)
     user_content = json.dumps(payload, indent=2, default=str)
 
-    logger.info(f"Running lint with {provider}/{model_id} (fallback={was_fallback})")
+    # Azure OpenAI takes precedence over direct OpenAI when configured.
+    use_azure = bool(azure_openai_api_key and azure_openai_endpoint)
+
+    logger.info(
+        f"Running lint with {'azure/' if use_azure else ''}{provider}/{model_id} "
+        f"(fallback={was_fallback})"
+    )
 
     if provider == "anthropic":
         if not anthropic_api_key:
             raise ValueError(f"Bot uses Anthropic model '{model_id}' but ANTHROPIC_API_KEY is not set.")
         report = await _lint_anthropic(anthropic_api_key, model_id, user_content)
+    elif use_azure:
+        deployment = azure_openai_deployment or model_id
+        report = await _lint_azure_openai(
+            azure_openai_api_key,
+            azure_openai_endpoint,
+            azure_openai_api_version,
+            deployment,
+            user_content,
+        )
+        model_id = deployment
     else:
         if not openai_api_key:
-            raise ValueError(f"Bot uses OpenAI model '{model_id}' but OPENAI_API_KEY is not set.")
+            raise ValueError(
+                f"Bot uses OpenAI model '{model_id}' but neither OPENAI_API_KEY "
+                "nor AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT are set."
+            )
         report = await _lint_openai(openai_api_key, model_id, user_content)
 
     fallback_note = " (fallback — unknown model hint)" if was_fallback else ""
