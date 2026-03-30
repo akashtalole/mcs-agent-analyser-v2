@@ -2005,7 +2005,7 @@ def _mcs_multi_turn_var_row(item: dict) -> rx.Component:
         [
             rx.text(item["name"], font_size="12px", color="var(--gray-12)", font_family=_MONO),
             rx.badge(item["scope"], color_scheme="teal", variant="soft", size="1"),
-            rx.text("Turn " + item["set_in_turn"], font_size="12px", color="var(--gray-a9)"),
+            rx.text("Turn ", item["set_in_turn"], font_size="12px", color="var(--gray-a9)"),
             rx.text(item["value"], font_size="12px", color="var(--gray-a10)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
         ],
         "1fr 80px 70px 1fr",
