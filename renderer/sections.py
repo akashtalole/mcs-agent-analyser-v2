@@ -5,11 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 
 from models import (
+    AgentTurnSummary,
     BotProfile,
     ConversationTimeline,
     CreditEstimate,
     EventType,
     ExecutionPhase,
+    MultiTurnAgentAnalysis,
 )
 
 from model_comparison import build_comparison_markdown
@@ -1335,3 +1337,284 @@ def render_conversation_flow_md(timeline: ConversationTimeline) -> str:
             lines.append(line)
     lines.append("")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Multi-turn agent analysis
+# ---------------------------------------------------------------------------
+
+
+def build_multi_turn_agent_analysis(
+    timeline: ConversationTimeline,
+    profile: BotProfile | None = None,
+) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    """Analyse agent routing across all turns in a multi-agent conversation.
+
+    Groups timeline events by USER_MESSAGE boundaries and produces per-turn
+    agent activity, plus cross-turn aggregate metrics.
+
+    Returns a 4-tuple of serialisable list[dict] for Reflex state:
+      (turns_data, agent_freq_data, var_retention_data, kpis_data)
+    """
+    import re as _re
+
+    # Known system topic name substrings — these should never fire during
+    # normal generative orchestration (GPT-5-Chat issue indicator).
+    _SYSTEM_TOPIC_PATTERNS = (
+        "conversationboost", "conversation boosting",
+        "escalat",
+        "fallback", "unknownintent", "on unknown intent",
+        "endconversation", "end conversation",
+    )
+
+    def _is_system_topic(name: str) -> bool:
+        nl = name.lower()
+        return any(p in nl for p in _SYSTEM_TOPIC_PATTERNS)
+
+    # ── Group events into per-turn buckets ───────────────────────────────────
+    turn_buckets: list[list] = []
+    current_bucket: list = []
+    user_ts_per_turn: list[str | None] = []
+
+    for ev in timeline.events:
+        if ev.event_type == EventType.USER_MESSAGE:
+            if current_bucket:
+                turn_buckets.append(current_bucket)
+            current_bucket = [ev]
+            user_ts_per_turn.append(ev.timestamp)
+        else:
+            current_bucket.append(ev)
+
+    if current_bucket:
+        turn_buckets.append(current_bucket)
+
+    if not turn_buckets:
+        return [], [], [], []
+
+    # ── Build per-turn summaries ─────────────────────────────────────────────
+    turn_summaries: list[AgentTurnSummary] = []
+    # Track variables first set per name: {var_name: (turn_number, scope, value)}
+    var_first_set: dict[str, dict] = {}
+
+    for turn_idx, bucket in enumerate(turn_buckets):
+        turn_number = turn_idx + 1
+        user_message = ""
+        agents_invoked: list[str] = []
+        agent_types: list[str] = []
+        outcome = "unknown"
+        variables_set: list[dict] = []
+        redirects: list[str] = []
+        errors: list[str] = []
+        bot_ts: str | None = None
+        system_topics_fired: list[str] = []
+        orchestrator_ask: str = ""
+        has_debug_event: bool = False
+
+        for ev in bucket:
+            if ev.event_type == EventType.USER_MESSAGE:
+                user_message = (ev.summary or "").replace("User: ", "", 1).strip()
+
+            elif ev.event_type == EventType.PLAN_RECEIVED_DEBUG:
+                has_debug_event = True
+                if not orchestrator_ask and ev.orchestrator_ask:
+                    orchestrator_ask = ev.orchestrator_ask
+
+            elif ev.event_type == EventType.STEP_TRIGGERED:
+                agent_name = ev.topic_name or ev.summary or ""
+                if agent_name and agent_name not in agents_invoked:
+                    agents_invoked.append(agent_name)
+                # Extract tool type from summary parenthetical e.g. "(ConnectedAgent)"
+                m = _re.search(r"\((\w+)\)", ev.summary or "")
+                if m:
+                    atype = m.group(1)
+                    if atype not in agent_types:
+                        agent_types.append(atype)
+                # Detect system topic intrusion
+                if agent_name and _is_system_topic(agent_name):
+                    display = ev.topic_name or agent_name
+                    if display not in system_topics_fired:
+                        system_topics_fired.append(display)
+
+            elif ev.event_type == EventType.STEP_FINISHED:
+                state = (ev.state or "").lower()
+                if state in ("success", "succeeded", "completed"):
+                    outcome = "success"
+                elif state in ("failed", "error", "failure"):
+                    if outcome != "success":
+                        outcome = "failed"
+                elif state and outcome == "unknown":
+                    outcome = state
+
+            elif ev.event_type == EventType.VARIABLE_ASSIGNMENT:
+                # Summary format: "Var: <name> = <value> (scope)"
+                summary = ev.summary or ""
+                m_var = _re.match(r"Var:\s*(.+?)\s*=\s*(.+?)(?:\s*\((\w+)\))?$", summary)
+                if m_var:
+                    var_name = m_var.group(1).strip()
+                    var_value = m_var.group(2).strip()
+                    var_scope = m_var.group(3) or "unknown"
+                else:
+                    # Fallback: use full summary as name
+                    var_name = summary[:60]
+                    var_value = ""
+                    var_scope = "unknown"
+                entry = {"name": var_name, "value": var_value, "scope": var_scope}
+                variables_set.append(entry)
+                if var_name not in var_first_set:
+                    var_first_set[var_name] = {
+                        "name": var_name,
+                        "scope": var_scope,
+                        "set_in_turn": turn_number,
+                        "value": var_value,
+                    }
+
+            elif ev.event_type == EventType.DIALOG_REDIRECT:
+                target = (ev.summary or "").replace("Redirect → ", "").strip()
+                if target and target not in redirects:
+                    redirects.append(target)
+                if outcome == "unknown":
+                    outcome = "redirected"
+                # Also flag system topic redirects
+                if target and _is_system_topic(target) and target not in system_topics_fired:
+                    system_topics_fired.append(target)
+
+            elif ev.event_type == EventType.ERROR:
+                err_msg = ev.error or ev.summary or "unknown error"
+                if err_msg not in errors:
+                    errors.append(err_msg)
+                if outcome not in ("success", "failed"):
+                    outcome = "failed"
+
+            elif ev.event_type in (EventType.BOT_MESSAGE, EventType.ACTION_SEND_ACTIVITY):
+                bot_ts = ev.timestamp
+                if outcome == "unknown" and not errors:
+                    outcome = "success"
+
+        # Compute context_enriched: None if no debug data; False if model echoed raw query
+        context_enriched: bool | None = None
+        if has_debug_event:
+            if orchestrator_ask and user_message:
+                context_enriched = orchestrator_ask.strip().lower() != user_message.strip().lower()
+            else:
+                context_enriched = bool(orchestrator_ask)
+
+        # Compute latency for this turn
+        latency = _ms_between_iso(
+            user_ts_per_turn[turn_idx] if turn_idx < len(user_ts_per_turn) else None,
+            bot_ts,
+        )
+
+        turn_summaries.append(
+            AgentTurnSummary(
+                turn_number=turn_number,
+                user_message=user_message,
+                agents_invoked=agents_invoked,
+                agent_types=agent_types,
+                outcome=outcome,
+                variables_set=variables_set,
+                redirects=redirects,
+                errors=errors,
+                latency_ms=latency,
+                system_topics_fired=system_topics_fired,
+                orchestrator_ask=orchestrator_ask,
+                context_enriched=context_enriched,
+            )
+        )
+
+    # ── Compute cross-turn aggregate metrics ─────────────────────────────────
+    agent_frequency: dict[str, int] = {}
+    for ts in turn_summaries:
+        for agent in ts.agents_invoked:
+            agent_frequency[agent] = agent_frequency.get(agent, 0) + 1
+
+    agents_used = sorted(agent_frequency.keys())
+
+    agent_switch_count = 0
+    for i in range(1, len(turn_summaries)):
+        prev_agents = set(turn_summaries[i - 1].agents_invoked)
+        curr_agents = set(turn_summaries[i].agents_invoked)
+        if prev_agents and curr_agents and prev_agents != curr_agents:
+            agent_switch_count += 1
+
+    context_carry_count = sum(
+        1 for ts in turn_summaries[1:] if ts.variables_set
+    )
+
+    context_drop_count = sum(
+        1 for ts in turn_summaries if ts.context_enriched is False
+    )
+
+    system_topic_intrusion_count = sum(
+        1 for ts in turn_summaries if ts.system_topics_fired
+    )
+
+    # ── Feature C: Connected agent skip detection ─────────────────────────────
+    _AGENT_TOOL_TYPES = {"ConnectedAgent", "ChildAgent", "A2AAgent", "ExternalAgent"}
+    configured_agents: list[str] = []
+    if profile is not None:
+        for comp in profile.components:
+            if comp.tool_type in _AGENT_TOOL_TYPES and comp.display_name:
+                if comp.display_name not in configured_agents:
+                    configured_agents.append(comp.display_name)
+
+    never_invoked_agents: list[str] = [
+        a for a in configured_agents if a not in agents_used
+    ]
+
+    analysis = MultiTurnAgentAnalysis(
+        turns=turn_summaries,
+        total_turns=len(turn_summaries),
+        agents_used=agents_used,
+        agent_frequency=agent_frequency,
+        agent_switch_count=agent_switch_count,
+        variable_retention=list(var_first_set.values()),
+        context_carry_count=context_carry_count,
+    )
+
+    # ── Serialise to list[dict] for Reflex state ─────────────────────────────
+    turns_data: list[dict] = []
+    for ts in analysis.turns:
+        turns_data.append({
+            "turn_number": str(ts.turn_number),
+            "user_message": ts.user_message,
+            "agents_invoked": ", ".join(ts.agents_invoked) if ts.agents_invoked else "—",
+            "agent_types": ", ".join(ts.agent_types) if ts.agent_types else "—",
+            "outcome": ts.outcome,
+            "variables_set": str(len(ts.variables_set)),
+            "redirects": ", ".join(ts.redirects) if ts.redirects else "—",
+            "errors": "; ".join(ts.errors) if ts.errors else "",
+            "latency_ms": f"{ts.latency_ms:.0f}" if ts.latency_ms > 0 else "",
+            "system_topics_fired": ", ".join(ts.system_topics_fired) if ts.system_topics_fired else "",
+            "orchestrator_ask": ts.orchestrator_ask,
+            "context_enriched": "" if ts.context_enriched is None else str(ts.context_enriched),
+        })
+
+    # Invoked agents sorted by frequency descending, never-invoked appended with count "0"
+    agent_freq_data: list[dict] = [
+        {"agent": agent, "count": str(count), "never_invoked": "false"}
+        for agent, count in sorted(analysis.agent_frequency.items(), key=lambda x: -x[1])
+    ] + [
+        {"agent": agent, "count": "0", "never_invoked": "true"}
+        for agent in never_invoked_agents
+    ]
+
+    var_retention_data: list[dict] = [
+        {
+            "name": v["name"],
+            "scope": v["scope"],
+            "set_in_turn": str(v["set_in_turn"]),
+            "value": v["value"],
+        }
+        for v in analysis.variable_retention
+    ]
+
+    kpis_data: list[dict] = [
+        {"label": "Total Turns", "value": str(analysis.total_turns)},
+        {"label": "Agents Used", "value": str(len(analysis.agents_used))},
+        {"label": "Agent Switches", "value": str(analysis.agent_switch_count)},
+        {"label": "Turns with Variables Set", "value": str(context_carry_count)},
+        {"label": "Context Drops", "value": str(context_drop_count)},
+        {"label": "System Topic Intrusions", "value": str(system_topic_intrusion_count)},
+    ]
+
+    return turns_data, agent_freq_data, var_retention_data, kpis_data

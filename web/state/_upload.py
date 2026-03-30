@@ -26,6 +26,7 @@ from renderer.sections import (  # noqa: E402
     _ms_between_iso,
     build_conversation_flow_items,
     build_conversation_visual_summary,
+    build_multi_turn_agent_analysis,
     build_orchestrator_decision_timeline,
     build_plan_evolution,
     build_topic_lifecycles,
@@ -986,11 +987,21 @@ class UploadMixin(rx.State, mixin=True):
             self.mcs_routing_lifecycles = build_topic_lifecycles(timeline)  # type: ignore[attr-defined]
             self.mcs_routing_decisions = build_orchestrator_decision_timeline(timeline, profile=profile)  # type: ignore[attr-defined]
             self.mcs_routing_plan_evolution = build_plan_evolution(timeline, profile=profile)  # type: ignore[attr-defined]
+            (
+                self.mcs_multi_turn_turns,  # type: ignore[attr-defined]
+                self.mcs_multi_turn_agent_freq,  # type: ignore[attr-defined]
+                self.mcs_multi_turn_var_retention,  # type: ignore[attr-defined]
+                self.mcs_multi_turn_kpis,  # type: ignore[attr-defined]
+            ) = build_multi_turn_agent_analysis(timeline, profile=profile)
         else:
             self.mcs_topics_trigger_matches = []  # type: ignore[attr-defined]
             self.mcs_routing_lifecycles = []  # type: ignore[attr-defined]
             self.mcs_routing_decisions = []  # type: ignore[attr-defined]
             self.mcs_routing_plan_evolution = []  # type: ignore[attr-defined]
+            self.mcs_multi_turn_turns = []  # type: ignore[attr-defined]
+            self.mcs_multi_turn_agent_freq = []  # type: ignore[attr-defined]
+            self.mcs_multi_turn_var_retention = []  # type: ignore[attr-defined]
+            self.mcs_multi_turn_kpis = []  # type: ignore[attr-defined]
 
         # Graph anomalies
         anomalies = detect_topic_graph_anomalies(profile)
@@ -1250,6 +1261,10 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_routing_lifecycles = []  # type: ignore[attr-defined]
         self.mcs_routing_decisions = []  # type: ignore[attr-defined]
         self.mcs_routing_plan_evolution = []  # type: ignore[attr-defined]
+        self.mcs_multi_turn_turns = []  # type: ignore[attr-defined]
+        self.mcs_multi_turn_agent_freq = []  # type: ignore[attr-defined]
+        self.mcs_multi_turn_var_retention = []  # type: ignore[attr-defined]
+        self.mcs_multi_turn_kpis = []  # type: ignore[attr-defined]
         self.mcs_model_kpis = []  # type: ignore[attr-defined]
         self.mcs_model_configured = []  # type: ignore[attr-defined]
         self.mcs_model_strengths = []  # type: ignore[attr-defined]

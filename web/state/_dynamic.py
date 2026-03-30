@@ -110,6 +110,12 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_routing_decisions: list[dict] = []
     mcs_routing_plan_evolution: list[dict] = []
 
+    # ── Multi-Turn Agent Analysis ─────────────────────────────────────────────
+    mcs_multi_turn_turns: list[dict] = []
+    mcs_multi_turn_agent_freq: list[dict] = []
+    mcs_multi_turn_var_retention: list[dict] = []
+    mcs_multi_turn_kpis: list[dict] = []
+
     # ── Model tab ────────────────────────────────────────────────────────────
     mcs_model_kpis: list[dict] = []
     mcs_model_configured: list[dict] = []
@@ -167,6 +173,10 @@ class DynamicMixin(rx.State, mixin=True):
     @rx.var
     def has_mcs_conv_detail(self) -> bool:
         return bool(self.mcs_conv_metadata)
+
+    @rx.var
+    def has_mcs_multi_turn_analysis(self) -> bool:
+        return bool(self.mcs_multi_turn_turns)
 
     @rx.event
     def set_mcs_analyse_tab(self, tab: str):
