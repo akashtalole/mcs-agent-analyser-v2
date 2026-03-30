@@ -200,6 +200,35 @@ class ConversationTimeline(BaseModel):
     custom_search_steps: list[CustomSearchStep] = Field(default_factory=list)
 
 
+# --- Multi-turn agent analysis models ---
+
+
+class AgentTurnSummary(BaseModel):
+    """Per-turn agent activity in a multi-agent conversation."""
+
+    turn_number: int
+    user_message: str = ""
+    agents_invoked: list[str] = Field(default_factory=list)
+    agent_types: list[str] = Field(default_factory=list)
+    outcome: str = "unknown"  # success | failed | redirected | unknown
+    variables_set: list[dict] = Field(default_factory=list)
+    redirects: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    latency_ms: float = 0.0
+
+
+class MultiTurnAgentAnalysis(BaseModel):
+    """Cross-turn analysis of agent routing in a multi-agent conversation."""
+
+    turns: list[AgentTurnSummary] = Field(default_factory=list)
+    total_turns: int = 0
+    agents_used: list[str] = Field(default_factory=list)
+    agent_frequency: dict[str, int] = Field(default_factory=dict)
+    agent_switch_count: int = 0
+    variable_retention: list[dict] = Field(default_factory=list)
+    context_carry_count: int = 0
+
+
 # --- Credit estimation models ---
 
 
